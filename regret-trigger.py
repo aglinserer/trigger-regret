@@ -1,11 +1,30 @@
 import argparse
 import requests
 from bs4 import BeautifulSoup
+from urllib.parse import urlparse, parse_qs
 from pathlib import Path
-from typing import List
+from typing import List, Tuple
 
 
 URL = "https://ubuntu-archive-team.ubuntu.com/proposed-migration/{}/update_excuses.html"
+
+
+def url_to_attrs(url: str) -> Tuple[str, str, str]:
+    parsed_url = urlparse(url)
+    query_string = parsed_url.query
+    url_args = parse_qs(query_string)
+
+    return (
+        url_args['package'][0], url_args['release'][0], url_args['arch'][0]
+    )
+
+
+def pkgtest_is_queued(pkg: str, dist: str, arch: str) -> bool:
+    url = f"https://autopkgtest.ubuntu.com/packages/a/{pkg}/{dist}/{arch}"
+    rsp = requests.get(url, timeout=5)
+    soup = BeautifulSoup(rsp.content, 'lxml')
+    unfinished = soup.find_all('tr', attrs={'class': 'unfinished'})
+    return bool(unfinished)
 
 
 def parse_args():
@@ -66,6 +85,9 @@ def send_triggers(link_list: List[str]) -> List[str]:
     # retrigger all of those
     ret = ""
     for url in link_list:
+        if pkgtest_is_queued(*url_to_attrs(url)):
+            ret += f"Skip {url}\n"
+            continue
         req_ret = requests.get(url, cookies=cookies, timeout=5)
         ret += f"{req_ret.status_code} - {url}\n"
     return ret
